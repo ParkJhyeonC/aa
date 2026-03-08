@@ -38,6 +38,6 @@ def test_extract_progress_prefers_max(monkeypatch):
 
 
 def test_build_ocr_reader_none_mode():
-    reader, warning = _build_ocr_reader("none", None)
+    reader, warning = _build_ocr_reader("none", None, False)
     assert reader is None
     assert warning is not None

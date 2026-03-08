@@ -41,6 +41,7 @@ python progress_alarm.py --tesseract-cmd "C:\Program Files\Tesseract-OCR\tessera
 - `--reset-gap` : 진행률이 충분히 내려가면 재알림 허용 (기본 5)
 - `--alarm-repeat-seconds` : 임계치 이상일 때 반복 알림 간격(초, 기본 0=최초 1회)
 - `--ocr-engine` : OCR 엔진 선택 (`auto`/`tesseract`/`easyocr`/`none`)
+- `--auto-install-ocr` : OCR 관련 패키지/엔진이 없으면 자동 설치 시도
 
 예시(30초마다 반복 알림):
 ```bash
@@ -91,4 +92,15 @@ progress-alarm.exe --ocr-engine none
 ```bash
 pip install easyocr
 progress-alarm.exe --ocr-engine easyocr
+```
+
+## OCR 자동 설치
+- `--auto-install-ocr` 옵션을 주면 OCR 의존성 자동 설치를 시도합니다.
+- `pytesseract`/`easyocr` 패키지 설치를 자동으로 시도합니다.
+- Windows에서는 `winget`이 있을 때 Tesseract 실행 파일 설치도 시도합니다.
+- 네트워크/권한/회사 정책에 따라 자동 설치가 실패할 수 있습니다.
+
+예시:
+```bash
+progress-alarm.exe --ocr-engine auto --auto-install-ocr
 ```

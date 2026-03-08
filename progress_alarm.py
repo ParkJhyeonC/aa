@@ -2,6 +2,7 @@ import argparse
 import ctypes
 import platform
 import re
+import subprocess
 import sys
 import time
 from dataclasses import dataclass
@@ -34,6 +35,63 @@ def _running_as_frozen_exe() -> bool:
 def _pause_before_exit_if_needed() -> None:
     if platform.system() == "Windows" and _running_as_frozen_exe():
         input("\n엔터를 누르면 종료됩니다...")
+
+
+def _run_command(command: list[str]) -> tuple[bool, str]:
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=300,
+            check=False,
+        )
+    except Exception as exc:
+        return False, str(exc)
+
+    if result.returncode == 0:
+        return True, (result.stdout or "").strip()
+    output = (result.stderr or result.stdout or "").strip()
+    return False, output
+
+
+def _install_python_package(package: str) -> tuple[bool, str]:
+    installers = [
+        [sys.executable, "-m", "pip", "install", package],
+        ["py", "-m", "pip", "install", package],
+    ]
+    for command in installers:
+        ok, message = _run_command(command)
+        if ok:
+            return True, f"{package} 설치 성공"
+    return False, f"{package} 설치 실패"
+
+
+def _ensure_tesseract_binary(auto_install_ocr: bool) -> tuple[bool, Optional[str]]:
+    if platform.system() != "Windows":
+        return False, "Windows 환경이 아니어서 Tesseract 자동 설치를 건너뜁니다."
+
+    ok, _ = _run_command(["where", "tesseract"])
+    if ok:
+        return True, None
+
+    if not auto_install_ocr:
+        return False, "Tesseract 실행 파일이 없습니다."
+
+    winget_ok, _ = _run_command(["winget", "--version"])
+    if not winget_ok:
+        return False, "winget을 찾지 못해 Tesseract 자동 설치를 할 수 없습니다."
+
+    ok, message = _run_command(
+        ["winget", "install", "--id", "UB-Mannheim.TesseractOCR", "-e", "--silent"]
+    )
+    if not ok:
+        return False, f"winget으로 Tesseract 자동 설치 실패: {message}"
+
+    ok, _ = _run_command(["where", "tesseract"])
+    if ok:
+        return True, "winget으로 Tesseract를 자동 설치했습니다."
+    return False, "자동 설치 후에도 Tesseract 경로를 찾지 못했습니다."
 
 
 def _parse_time_to_seconds(value: str) -> Optional[int]:
@@ -173,14 +231,26 @@ def capture_screen_image():
 
 def _build_tesseract_reader(
     tesseract_cmd: Optional[str],
+    auto_install_ocr: bool,
 ) -> tuple[Optional[Callable[[object], str]], Optional[str]]:
     try:
         import pytesseract
     except Exception:
-        return None, "pytesseract 패키지가 없어 Tesseract OCR을 사용할 수 없습니다."
+        if auto_install_ocr:
+            ok, _ = _install_python_package("pytesseract")
+            if ok:
+                import pytesseract
+            else:
+                return None, "pytesseract 자동 설치에 실패했습니다."
+        else:
+            return None, "pytesseract 패키지가 없어 Tesseract OCR을 사용할 수 없습니다."
 
     if tesseract_cmd:
         pytesseract.pytesseract.tesseract_cmd = tesseract_cmd
+    else:
+        _, warn = _ensure_tesseract_binary(auto_install_ocr)
+        if warn and auto_install_ocr:
+            print(f"[WARN] {warn}")
 
     def _reader(image) -> str:
         grayscale = image.convert("L")
@@ -197,12 +267,25 @@ def _build_tesseract_reader(
     return _reader, None
 
 
-def _build_easyocr_reader() -> tuple[Optional[Callable[[object], str]], Optional[str]]:
+def _build_easyocr_reader(
+    auto_install_ocr: bool,
+) -> tuple[Optional[Callable[[object], str]], Optional[str]]:
     try:
         import easyocr
         import numpy as np
     except Exception:
-        return None, "easyocr 패키지가 없어 EasyOCR을 사용할 수 없습니다."
+        if not auto_install_ocr:
+            return None, "easyocr 패키지가 없어 EasyOCR을 사용할 수 없습니다."
+
+        ok, _ = _install_python_package("easyocr")
+        if not ok:
+            return None, "easyocr 자동 설치에 실패했습니다."
+
+        try:
+            import easyocr
+            import numpy as np
+        except Exception:
+            return None, "easyocr 설치 후 import에 실패했습니다."
 
     try:
         reader = easyocr.Reader(["en"], gpu=False)
@@ -220,22 +303,22 @@ def _build_easyocr_reader() -> tuple[Optional[Callable[[object], str]], Optional
 def _build_ocr_reader(
     ocr_engine: str,
     tesseract_cmd: Optional[str],
+    auto_install_ocr: bool,
 ) -> tuple[Optional[Callable[[object], str]], Optional[str]]:
     if ocr_engine == "none":
         return None, "OCR을 비활성화했습니다(바 기반 감지만 사용)."
 
     if ocr_engine == "tesseract":
-        return _build_tesseract_reader(tesseract_cmd)
+        return _build_tesseract_reader(tesseract_cmd, auto_install_ocr)
 
     if ocr_engine == "easyocr":
-        return _build_easyocr_reader()
+        return _build_easyocr_reader(auto_install_ocr)
 
-    # auto: tesseract -> easyocr 순서로 시도
-    reader, warning = _build_tesseract_reader(tesseract_cmd)
+    reader, warning = _build_tesseract_reader(tesseract_cmd, auto_install_ocr)
     if reader is not None:
         return reader, None
 
-    easy_reader, easy_warning = _build_easyocr_reader()
+    easy_reader, easy_warning = _build_easyocr_reader(auto_install_ocr)
     if easy_reader is not None:
         return easy_reader, (
             "Tesseract를 사용할 수 없어 EasyOCR로 대체했습니다. "
@@ -267,9 +350,10 @@ def monitor_progress(
     reset_gap: int,
     alarm_repeat_seconds: float,
     ocr_engine: str,
+    auto_install_ocr: bool,
     tesseract_cmd: Optional[str] = None,
 ) -> None:
-    ocr_reader, ocr_warning = _build_ocr_reader(ocr_engine, tesseract_cmd)
+    ocr_reader, ocr_warning = _build_ocr_reader(ocr_engine, tesseract_cmd, auto_install_ocr)
     if ocr_warning:
         print(f"[WARN] {ocr_warning}")
     if ocr_reader is None:
@@ -279,7 +363,8 @@ def monitor_progress(
     print(
         "진행률 모니터링 시작: "
         f"threshold={threshold}%, interval={interval}s, reset_gap={reset_gap}%, "
-        f"alarm_repeat_seconds={alarm_repeat_seconds}s, ocr_engine={ocr_engine}"
+        f"alarm_repeat_seconds={alarm_repeat_seconds}s, ocr_engine={ocr_engine}, "
+        f"auto_install_ocr={auto_install_ocr}"
     )
     print("종료하려면 Ctrl+C를 누르세요.")
 
@@ -351,6 +436,11 @@ def parse_args() -> argparse.Namespace:
         help="OCR 엔진 선택(auto/tesseract/easyocr/none, 기본: auto)",
     )
     parser.add_argument(
+        "--auto-install-ocr",
+        action="store_true",
+        help="OCR 엔진/의존성이 없으면 자동 설치를 시도합니다.",
+    )
+    parser.add_argument(
         "--tesseract-cmd",
         type=str,
         default=None,
@@ -374,6 +464,7 @@ def main() -> None:
         reset_gap=args.reset_gap,
         alarm_repeat_seconds=args.alarm_repeat_seconds,
         ocr_engine=args.ocr_engine,
+        auto_install_ocr=args.auto_install_ocr,
         tesseract_cmd=args.tesseract_cmd,
     )
 
