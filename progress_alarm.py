@@ -1,5 +1,6 @@
 import argparse
 import ctypes
+import importlib
 import platform
 import re
 import subprocess
@@ -270,9 +271,13 @@ def _build_tesseract_reader(
 def _build_easyocr_reader(
     auto_install_ocr: bool,
 ) -> tuple[Optional[Callable[[object], str]], Optional[str]]:
+    def _load_modules():
+        easyocr_module = importlib.import_module("easyocr")
+        np_module = importlib.import_module("numpy")
+        return easyocr_module, np_module
+
     try:
-        import easyocr
-        import numpy as np
+        easyocr_module, np_module = _load_modules()
     except Exception:
         if not auto_install_ocr:
             return None, "easyocr 패키지가 없어 EasyOCR을 사용할 수 없습니다."
@@ -282,18 +287,17 @@ def _build_easyocr_reader(
             return None, "easyocr 자동 설치에 실패했습니다."
 
         try:
-            import easyocr
-            import numpy as np
+            easyocr_module, np_module = _load_modules()
         except Exception:
             return None, "easyocr 설치 후 import에 실패했습니다."
 
     try:
-        reader = easyocr.Reader(["en"], gpu=False)
+        reader = easyocr_module.Reader(["en"], gpu=False)
     except Exception as exc:
         return None, f"EasyOCR 초기화에 실패했습니다: {exc}"
 
     def _reader(image) -> str:
-        img = np.array(image.convert("RGB"))
+        img = np_module.array(image.convert("RGB"))
         results = reader.readtext(img, detail=0, paragraph=True)
         return "\n".join(results)
 
