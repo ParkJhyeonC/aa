@@ -171,13 +171,13 @@ def capture_screen_image():
     return Image.frombytes("RGB", shot.size, shot.rgb)
 
 
-def _build_ocr_reader(
+def _build_tesseract_reader(
     tesseract_cmd: Optional[str],
 ) -> tuple[Optional[Callable[[object], str]], Optional[str]]:
     try:
         import pytesseract
     except Exception:
-        return None, "pytesseract 패키지가 없어 OCR(텍스트/시간) 감지를 비활성화합니다."
+        return None, "pytesseract 패키지가 없어 Tesseract OCR을 사용할 수 없습니다."
 
     if tesseract_cmd:
         pytesseract.pytesseract.tesseract_cmd = tesseract_cmd
@@ -195,6 +195,57 @@ def _build_ocr_reader(
         )
 
     return _reader, None
+
+
+def _build_easyocr_reader() -> tuple[Optional[Callable[[object], str]], Optional[str]]:
+    try:
+        import easyocr
+        import numpy as np
+    except Exception:
+        return None, "easyocr 패키지가 없어 EasyOCR을 사용할 수 없습니다."
+
+    try:
+        reader = easyocr.Reader(["en"], gpu=False)
+    except Exception as exc:
+        return None, f"EasyOCR 초기화에 실패했습니다: {exc}"
+
+    def _reader(image) -> str:
+        img = np.array(image.convert("RGB"))
+        results = reader.readtext(img, detail=0, paragraph=True)
+        return "\n".join(results)
+
+    return _reader, None
+
+
+def _build_ocr_reader(
+    ocr_engine: str,
+    tesseract_cmd: Optional[str],
+) -> tuple[Optional[Callable[[object], str]], Optional[str]]:
+    if ocr_engine == "none":
+        return None, "OCR을 비활성화했습니다(바 기반 감지만 사용)."
+
+    if ocr_engine == "tesseract":
+        return _build_tesseract_reader(tesseract_cmd)
+
+    if ocr_engine == "easyocr":
+        return _build_easyocr_reader()
+
+    # auto: tesseract -> easyocr 순서로 시도
+    reader, warning = _build_tesseract_reader(tesseract_cmd)
+    if reader is not None:
+        return reader, None
+
+    easy_reader, easy_warning = _build_easyocr_reader()
+    if easy_reader is not None:
+        return easy_reader, (
+            "Tesseract를 사용할 수 없어 EasyOCR로 대체했습니다. "
+            f"(참고: {warning})"
+        )
+
+    return None, (
+        "OCR 엔진을 사용할 수 없어 바(progress bar) 기반 감지만 사용합니다. "
+        f"(Tesseract: {warning} / EasyOCR: {easy_warning})"
+    )
 
 
 def send_alarm(progress: int) -> None:
@@ -215,18 +266,20 @@ def monitor_progress(
     interval: float,
     reset_gap: int,
     alarm_repeat_seconds: float,
+    ocr_engine: str,
     tesseract_cmd: Optional[str] = None,
 ) -> None:
-    ocr_reader, ocr_warning = _build_ocr_reader(tesseract_cmd)
+    ocr_reader, ocr_warning = _build_ocr_reader(ocr_engine, tesseract_cmd)
     if ocr_warning:
         print(f"[WARN] {ocr_warning}")
-        print("[WARN] 바(progress bar) 기반 감지는 계속 동작합니다.")
+    if ocr_reader is None:
+        print("[WARN] 텍스트/시간 인식 없이 바(progress bar) 기반 감지만 동작합니다.")
 
     state = ProgressState()
     print(
         "진행률 모니터링 시작: "
         f"threshold={threshold}%, interval={interval}s, reset_gap={reset_gap}%, "
-        f"alarm_repeat_seconds={alarm_repeat_seconds}s"
+        f"alarm_repeat_seconds={alarm_repeat_seconds}s, ocr_engine={ocr_engine}"
     )
     print("종료하려면 Ctrl+C를 누르세요.")
 
@@ -291,6 +344,13 @@ def parse_args() -> argparse.Namespace:
         help="임계치 이상 구간에서 알림 반복 간격(초). 0이면 최초 1회만 알림",
     )
     parser.add_argument(
+        "--ocr-engine",
+        type=str,
+        choices=["auto", "tesseract", "easyocr", "none"],
+        default="auto",
+        help="OCR 엔진 선택(auto/tesseract/easyocr/none, 기본: auto)",
+    )
+    parser.add_argument(
         "--tesseract-cmd",
         type=str,
         default=None,
@@ -313,6 +373,7 @@ def main() -> None:
         interval=args.interval,
         reset_gap=args.reset_gap,
         alarm_repeat_seconds=args.alarm_repeat_seconds,
+        ocr_engine=args.ocr_engine,
         tesseract_cmd=args.tesseract_cmd,
     )
 

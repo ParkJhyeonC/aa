@@ -7,6 +7,8 @@
 - 시간형 텍스트: `00:30/01:00`, `01:00:00/02:00:00` (OCR 필요)
 - 가로 바 형태 프로그레스(채워진 영역/빈 영역 색상 차이 기반 추정, OCR 없이도 가능)
 
+OCR은 `Tesseract` 외에 `EasyOCR`도 선택할 수 있습니다.
+
 여러 형식이 동시에 감지되면 가장 큰 진행률 값을 사용합니다.
 
 ## 종료할 때까지 계속 모니터링
@@ -38,6 +40,7 @@ python progress_alarm.py --tesseract-cmd "C:\Program Files\Tesseract-OCR\tessera
 - `--interval` : 감시 간격 초 (기본 1.0)
 - `--reset-gap` : 진행률이 충분히 내려가면 재알림 허용 (기본 5)
 - `--alarm-repeat-seconds` : 임계치 이상일 때 반복 알림 간격(초, 기본 0=최초 1회)
+- `--ocr-engine` : OCR 엔진 선택 (`auto`/`tesseract`/`easyocr`/`none`)
 
 예시(30초마다 반복 알림):
 ```bash
@@ -71,3 +74,21 @@ progress-alarm.exe --tesseract-cmd "C:\Program Files\Tesseract-OCR\tesseract.exe
 - 프로그램은 **자동으로 OCR 감지를 비활성화**하고 바(progress bar) 감지만으로 계속 동작합니다.
 - 즉, Tesseract가 없어도 프로그램이 바로 종료되지 않습니다.
 - 다만 이 경우 `%` 텍스트/시간형(`00:30/01:00`) 감지는 사용할 수 없습니다.
+
+
+## OCR 엔진 선택
+- 기본값 `--ocr-engine auto`: Tesseract를 먼저 시도하고, 실패하면 EasyOCR을 시도합니다.
+- `--ocr-engine tesseract`: Tesseract만 사용합니다.
+- `--ocr-engine easyocr`: EasyOCR만 사용합니다.
+- `--ocr-engine none`: OCR을 완전히 끄고 바(progress bar) 감지만 사용합니다.
+
+예시 (OCR 끄기):
+```bash
+progress-alarm.exe --ocr-engine none
+```
+
+예시 (EasyOCR 사용):
+```bash
+pip install easyocr
+progress-alarm.exe --ocr-engine easyocr
+```

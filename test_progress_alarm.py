@@ -1,5 +1,6 @@
 from progress_alarm import (
     ProgressDetection,
+    _build_ocr_reader,
     extract_percentage,
     extract_progress,
     extract_time_progress,
@@ -34,3 +35,9 @@ def test_extract_progress_prefers_max(monkeypatch):
     assert isinstance(result, ProgressDetection)
     assert result.value == 75
     assert result.source == "percent"
+
+
+def test_build_ocr_reader_none_mode():
+    reader, warning = _build_ocr_reader("none", None)
+    assert reader is None
+    assert warning is not None
