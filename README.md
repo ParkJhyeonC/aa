@@ -55,3 +55,13 @@ build_exe.bat
 ## 주의 사항
 - OCR 기반이라 화면 글꼴, 해상도, 배경 대비에 따라 인식률이 달라질 수 있습니다.
 - 바 형태 감지는 화면 내 요소(테마/그라데이션/애니메이션)에 따라 오인식이 발생할 수 있습니다.
+
+
+## exe가 바로 꺼질 때
+- 먼저 Tesseract OCR이 설치되어 있는지 확인하세요.
+- 가능하면 `cmd`에서 실행해서 오류 메시지를 확인하세요.
+- 경로가 다르면 아래처럼 `--tesseract-cmd`를 명시하세요.
+
+```bash
+progress-alarm.exe --tesseract-cmd "C:\Program Files\Tesseract-OCR\tesseract.exe"
+```

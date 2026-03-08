@@ -2,6 +2,7 @@ import argparse
 import ctypes
 import platform
 import re
+import sys
 import time
 from dataclasses import dataclass
 from typing import Optional
@@ -24,6 +25,15 @@ class ProgressState:
 class ProgressDetection:
     value: int
     source: str
+
+
+def _running_as_frozen_exe() -> bool:
+    return bool(getattr(sys, "frozen", False))
+
+
+def _pause_before_exit_if_needed() -> None:
+    if platform.system() == "Windows" and _running_as_frozen_exe():
+        input("\n엔터를 누르면 종료됩니다...")
 
 
 def _parse_time_to_seconds(value: str) -> Optional[int]:
@@ -203,38 +213,46 @@ def monitor_progress(
 
     try:
         while True:
-            image = capture_screen_image()
-            text = capture_screen_text(image)
-            detection = extract_progress(text, image)
+            try:
+                image = capture_screen_image()
+                text = capture_screen_text(image)
+                detection = extract_progress(text, image)
 
-            if detection is None:
-                print("[INFO] 진행률(퍼센트/시간/바)을 찾지 못했습니다.")
-                time.sleep(interval)
-                continue
+                if detection is None:
+                    print("[INFO] 진행률(퍼센트/시간/바)을 찾지 못했습니다.")
+                    time.sleep(interval)
+                    continue
 
-            progress = detection.value
-            source = detection.source
-            state.last_value = progress
-            print(f"[INFO] 현재 진행률: {progress}% (source={source})")
+                progress = detection.value
+                source = detection.source
+                state.last_value = progress
+                print(f"[INFO] 현재 진행률: {progress}% (source={source})")
 
-            now = time.time()
-            should_notify = False
+                now = time.time()
+                should_notify = False
 
-            if progress >= threshold and not state.notified:
-                should_notify = True
-            elif progress >= threshold and alarm_repeat_seconds > 0:
-                if now - state.last_alarm_at >= alarm_repeat_seconds:
+                if progress >= threshold and not state.notified:
                     should_notify = True
+                elif progress >= threshold and alarm_repeat_seconds > 0:
+                    if now - state.last_alarm_at >= alarm_repeat_seconds:
+                        should_notify = True
 
-            if should_notify:
-                send_alarm(progress)
-                state.notified = True
-                state.last_alarm_at = now
+                if should_notify:
+                    send_alarm(progress)
+                    state.notified = True
+                    state.last_alarm_at = now
 
-            if progress <= max(0, threshold - reset_gap):
-                state.notified = False
+                if progress <= max(0, threshold - reset_gap):
+                    state.notified = False
 
-            time.sleep(interval)
+                time.sleep(interval)
+            except Exception as exc:
+                print(f"[ERROR] 진행률 감지 중 오류가 발생했습니다: {exc}")
+                print(
+                    "[HINT] Tesseract가 설치되지 않았거나 경로가 다르면 "
+                    "--tesseract-cmd 옵션으로 실행 파일 경로를 지정하세요."
+                )
+                time.sleep(max(interval, 2.0))
     except KeyboardInterrupt:
         print("\n사용자 요청으로 모니터링을 종료했습니다.")
 
@@ -285,4 +303,9 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as exc:
+        print(f"[FATAL] 프로그램이 종료되었습니다: {exc}")
+        _pause_before_exit_if_needed()
+        raise
