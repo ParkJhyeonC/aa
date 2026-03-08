@@ -5,7 +5,7 @@ import re
 import sys
 import time
 from dataclasses import dataclass
-from typing import Optional
+from typing import Callable, Optional
 
 
 PERCENT_REGEX = re.compile(r"(?<!\d)(\d{1,3})\s*%")
@@ -171,11 +171,30 @@ def capture_screen_image():
     return Image.frombytes("RGB", shot.size, shot.rgb)
 
 
-def capture_screen_text(image) -> str:
-    import pytesseract
+def _build_ocr_reader(
+    tesseract_cmd: Optional[str],
+) -> tuple[Optional[Callable[[object], str]], Optional[str]]:
+    try:
+        import pytesseract
+    except Exception:
+        return None, "pytesseract 패키지가 없어 OCR(텍스트/시간) 감지를 비활성화합니다."
 
-    grayscale = image.convert("L")
-    return pytesseract.image_to_string(grayscale, lang="eng")
+    if tesseract_cmd:
+        pytesseract.pytesseract.tesseract_cmd = tesseract_cmd
+
+    def _reader(image) -> str:
+        grayscale = image.convert("L")
+        return pytesseract.image_to_string(grayscale, lang="eng")
+
+    try:
+        _ = pytesseract.get_tesseract_version()
+    except Exception:
+        return None, (
+            "Tesseract 실행 파일을 찾지 못해 OCR(텍스트/시간) 감지를 비활성화합니다. "
+            "--tesseract-cmd 옵션으로 경로를 지정할 수 있습니다."
+        )
+
+    return _reader, None
 
 
 def send_alarm(progress: int) -> None:
@@ -198,10 +217,10 @@ def monitor_progress(
     alarm_repeat_seconds: float,
     tesseract_cmd: Optional[str] = None,
 ) -> None:
-    import pytesseract
-
-    if tesseract_cmd:
-        pytesseract.pytesseract.tesseract_cmd = tesseract_cmd
+    ocr_reader, ocr_warning = _build_ocr_reader(tesseract_cmd)
+    if ocr_warning:
+        print(f"[WARN] {ocr_warning}")
+        print("[WARN] 바(progress bar) 기반 감지는 계속 동작합니다.")
 
     state = ProgressState()
     print(
@@ -215,7 +234,7 @@ def monitor_progress(
         while True:
             try:
                 image = capture_screen_image()
-                text = capture_screen_text(image)
+                text = ocr_reader(image) if ocr_reader else ""
                 detection = extract_progress(text, image)
 
                 if detection is None:
@@ -248,10 +267,6 @@ def monitor_progress(
                 time.sleep(interval)
             except Exception as exc:
                 print(f"[ERROR] 진행률 감지 중 오류가 발생했습니다: {exc}")
-                print(
-                    "[HINT] Tesseract가 설치되지 않았거나 경로가 다르면 "
-                    "--tesseract-cmd 옵션으로 실행 파일 경로를 지정하세요."
-                )
                 time.sleep(max(interval, 2.0))
     except KeyboardInterrupt:
         print("\n사용자 요청으로 모니터링을 종료했습니다.")
