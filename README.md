@@ -104,3 +104,19 @@ progress-alarm.exe --ocr-engine easyocr
 ```bash
 progress-alarm.exe --ocr-engine auto --auto-install-ocr
 ```
+
+
+## VSCode에서 "tesseract" 파일을 찾을 수 없다고 나올 때
+- 이 메시지는 Tesseract 경로가 설정되지 않았을 때 발생할 수 있습니다.
+- 아래 중 하나로 실행하면 우회 가능합니다.
+
+```bash
+progress-alarm.exe --ocr-engine none
+progress-alarm.exe --ocr-engine easyocr --auto-install-ocr
+```
+
+- Tesseract를 계속 쓰고 싶다면 `--tesseract-cmd`로 정확한 경로를 지정하세요.
+
+```bash
+progress-alarm.exe --ocr-engine tesseract --tesseract-cmd "C:\Program Files\Tesseract-OCR\tesseract.exe"
+```

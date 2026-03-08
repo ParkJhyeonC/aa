@@ -3,10 +3,12 @@ import ctypes
 import importlib
 import platform
 import re
+import shutil
 import subprocess
 import sys
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable, Optional
 
 
@@ -246,12 +248,33 @@ def _build_tesseract_reader(
         else:
             return None, "pytesseract 패키지가 없어 Tesseract OCR을 사용할 수 없습니다."
 
-    if tesseract_cmd:
-        pytesseract.pytesseract.tesseract_cmd = tesseract_cmd
+    resolved_tesseract_cmd = tesseract_cmd
+    if resolved_tesseract_cmd:
+        if not shutil.which(resolved_tesseract_cmd) and not Path(resolved_tesseract_cmd).exists():
+            return None, (
+                "지정한 --tesseract-cmd 경로를 찾지 못했습니다. "
+                "경로를 확인하거나 --ocr-engine easyocr / --ocr-engine none을 사용하세요."
+            )
+        pytesseract.pytesseract.tesseract_cmd = resolved_tesseract_cmd
     else:
-        _, warn = _ensure_tesseract_binary(auto_install_ocr)
-        if warn and auto_install_ocr:
-            print(f"[WARN] {warn}")
+        tesseract_on_path = shutil.which("tesseract")
+        if tesseract_on_path:
+            resolved_tesseract_cmd = tesseract_on_path
+            pytesseract.pytesseract.tesseract_cmd = resolved_tesseract_cmd
+        else:
+            _, warn = _ensure_tesseract_binary(auto_install_ocr)
+            if warn and auto_install_ocr:
+                print(f"[WARN] {warn}")
+
+            tesseract_on_path = shutil.which("tesseract")
+            if not tesseract_on_path:
+                return None, (
+                    "Tesseract 실행 파일을 찾지 못해 Tesseract OCR을 비활성화합니다. "
+                    "--ocr-engine easyocr 또는 --ocr-engine none을 사용하거나 "
+                    "--tesseract-cmd로 경로를 지정하세요."
+                )
+            resolved_tesseract_cmd = tesseract_on_path
+            pytesseract.pytesseract.tesseract_cmd = resolved_tesseract_cmd
 
     def _reader(image) -> str:
         grayscale = image.convert("L")
@@ -261,8 +284,8 @@ def _build_tesseract_reader(
         _ = pytesseract.get_tesseract_version()
     except Exception:
         return None, (
-            "Tesseract 실행 파일을 찾지 못해 OCR(텍스트/시간) 감지를 비활성화합니다. "
-            "--tesseract-cmd 옵션으로 경로를 지정할 수 있습니다."
+            "Tesseract 실행 확인에 실패했습니다. "
+            "--ocr-engine easyocr 또는 --ocr-engine none으로 실행해 보세요."
         )
 
     return _reader, None
